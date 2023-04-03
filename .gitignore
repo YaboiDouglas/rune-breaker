@@ -135,3 +135,6 @@ data/*
 logs/*
 
 *.png
+
+#log files
+*.v2

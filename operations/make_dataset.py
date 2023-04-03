@@ -20,8 +20,9 @@ def main(training_set_ratio):
     common.create_directories()
 
     arrows = pd.DataFrame(
-        np.zeros((3, 4), dtype=np.int32),
-        index=('round', 'wide', 'narrow'),
+        np.zeros((2, 4), dtype=np.int32),
+        #index=('round', 'wide', 'narrow'),
+        index=('round', 'wide'),
         columns=('down', 'left', 'right', 'up')
     )
 
@@ -118,4 +119,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args.ratio)
+    main(0.9)

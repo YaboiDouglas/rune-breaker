@@ -3,7 +3,7 @@ import re
 
 
 # Classification
-INPUT_SHAPE = (60, 60, 1)
+INPUT_SHAPE = (70, 70, 1)
 CLASSES = ['down', 'left', 'right', 'up']
 
 # Directories

@@ -11,14 +11,17 @@ import cv2
 import numpy as np
 import pandas as pd
 from skimage import morphology
+from matplotlib import pyplot as plt
 
 import common
 
 OUTPUT_WIDTH = common.INPUT_SHAPE[0]
 
 ARROW_BOX_DIST = 100
-SEARCH_REGION_WIDTH = 120
+SEARCH_REGION_WIDTH = 450
 SEARCH_REGION_HEIGHT = 100
+HALF_ARROW_WIDTH = 35
+HALF_ARROW_HEIGHT = 35
 
 EXIT_KEY = 113 # q
 APPROVE_KEY = 32 # space
@@ -37,32 +40,63 @@ def main(inspection, mode, automatic):
     for path, filename in labeled_imgs:
         print("Processing " + cf.skyBlue(path))
 
-        arrows = []
-
+        # Load the image
         display = cv2.imread(path)
         height, width, _ = display.shape
-
+        arrows = []
         # manually tuned values
-        search_x, search_y = width // 5 + 35, height // 4
+        search_x, search_y = width // 5 + 15, height // 4
         search_width, search_height = SEARCH_REGION_WIDTH, height // 2 - search_y
 
-        for _ in range(4):
-            x0 = search_x
-            x1 = x0 + search_width
+        x0 = search_x
+        x1 = x0 + search_width
 
-            y0 = search_y
-            y1 = y0 + search_height
+        y0 = search_y
+        y1 = y0 + search_height
 
-            img = display[y0:y1, x0:x1]
-            (cx, cy), arrow_box = process_arrow(img, mode)
+        img = display[y0:y1, x0:x1]
 
-            search_x += int(cx + ARROW_BOX_DIST - SEARCH_REGION_WIDTH / 2)
-            search_y += int(cy - SEARCH_REGION_HEIGHT / 2)
+        RGB_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if RGB_img is None:
+            print('Processing failed for: '+cf.skyBlue(path))
+            pass
+        # Apply Gaussian blur to reduce noise
+        img_blur = cv2.GaussianBlur(RGB_img, (3, 3), 0)
+  
+        # Apply Canny edge detection
+        edges = cv2.Canny(img_blur, 50, 150)
 
-            search_width = SEARCH_REGION_WIDTH
-            search_height = SEARCH_REGION_HEIGHT
+        # Apply Hough Circle Transform to detect circles
+        circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=25, minRadius=18, maxRadius=33)
 
-            arrows.append(arrow_box)
+        circle_coords = get_circle_centers(circles,img)
+        
+        if circle_coords == []:
+            print("No elements in array, arrow's not found.")
+            cv2.imshow('failed',RGB_img)
+            cv2.waitKey()
+            break
+        circle_coords.sort()
+
+        for x,y in circle_coords:
+            x0 = x - HALF_ARROW_WIDTH
+            x1 = x + HALF_ARROW_WIDTH
+
+            y0 = y - HALF_ARROW_HEIGHT
+            y1 = y + HALF_ARROW_HEIGHT
+
+            img = RGB_img[y0:y1, x0:x1]
+            #cv2.imshow('cropped original arrow',img)
+            #cv2.waitKey()
+            #(cx, cy), arrow_box = process_arrow(img, mode)
+
+            #search_x += int(cx + ARROW_BOX_DIST - SEARCH_REGION_WIDTH / 2)
+            #search_y += int(cy - SEARCH_REGION_HEIGHT / 2)
+
+            #search_width = SEARCH_REGION_WIDTH
+            #search_height = SEARCH_REGION_HEIGHT
+            processed_arrow = process_arrow(img,'binarized')
+            arrows.append(processed_arrow)
 
         if not automatic:
             arrow_type, directions, _ = re.split('_', filename)
@@ -98,25 +132,19 @@ def main(inspection, mode, automatic):
 def process_arrow(img, mode):
     # gaussian blur
     img = cv2.GaussianBlur(img, (3, 3), 0)
-
-    # color transform
     img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
     coefficients = (0.0445, 0.6568, 0.2987) # (h, s, v)
     img = cv2.transform(img, np.array(coefficients).reshape((1, 3)))
-
     if mode == 'gray':
         output = img.copy()
-
     # binarization
-    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 5, -1)
-
+    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 5,-1)
     # noise removal
     denoise(img, threshold=8, conn=2)
-
     if mode == 'binarized':
         output = img.copy()
-
+    '''
+    #we don't need this because of the other arrow location I did for ellinia arrows
     # processing
     cx, cy = compute_arrow_centroid(img)
 
@@ -137,9 +165,10 @@ def process_arrow(img, mode):
         y1 = max_height
 
     box = output[y0:y1, x0:x1]
-
+    
     return (cx, cy), box
-
+    '''
+    return output
 
 def denoise(img, threshold=64, conn=2):
     processed = img > 0
@@ -156,9 +185,87 @@ def denoise(img, threshold=64, conn=2):
     mask_x, mask_y = np.where(processed == False)
     img[mask_x, mask_y] = 0
 
+def get_circle_centers(circles,img):
+    circle_count = 0
+    if circles is not None:
+            x_list = []
+            final_list = []
+            # Convert the (x, y) coordinates and radius of the circles to integers
+            circles = np.round(circles[0, :]).astype("int")
+            for (x, y, r) in circles:
+                # Extract a circular ROI
+                roi = img[y-r:y+r, x-r:x+r]
+
+                # Calculate the mean color of the ROI
+                mean_color = cv2.mean(roi)
+
+                # Check if the mean color of the ROI is multi-colored
+                if len(mean_color) > 3 and (18<r<33):
+                    x_list.append(x)
+                    circle_count+=1
+                    #print(f"Multi-colored circle found at ({x}, {y}) with radius {r}")
+                    #cv2.circle(RGB_img,center_coords,r,(0,0,255),1)
+                    final_list.append([x,y])
+            #sort if there are more than 4 centers found
+            if((circle_count > 4) and (not check_interval(x_list))):
+                #if we need sort we replace final list completely by averaging values where possible
+                final_list = average_close_numbers(circles)
+                return final_list
+            else:
+                if(circle_count == 4):
+                    #return xy list
+                    return final_list
+                #otherwise we couldn't sort and fix issue or there were too little so we just say
+                #fuck it and re-do the rune by returning a blank list
+                if not (circle_count == 4):
+                    return []
+                
+def check_interval(lst):
+    lst.sort()  # Sort the list in ascending order
+    for i in range(len(lst)-1):
+        if lst[i+1] - lst[i] < 60:
+            return False
+    return True
+
+def average_close_numbers(lst):
+    b_just_sorted = False
+    #sort list on x element (index 0)
+    lst = lst[np.argsort(lst[:,0])]
+    #result output
+    result = []
+    xy_result = []
+    i = 0
+    #while there is still stuff in the list, keep iterating
+    while i < len(lst):
+        #we are at the end so exit loop
+        if i == len(lst) - 1:
+            #if we are at the end and we just sorted that means we have nothing left, otherwise we need to add the last element
+            if not b_just_sorted:
+                result.append(lst[i])
+            break
+        #check x values and if less than 60 differece then we need to add the averages to the result set
+        if lst[i+1][0] - lst[i][0] < 60:
+            avg_x = int(sum([lst[i][0], lst[i+1][0]]) / 2)
+            avg_y = int(sum([lst[i][1], lst[i+1][1]]) / 2)
+            avg_r = int(sum([lst[i][2], lst[i+1][2]]) / 2)
+            
+            result.append([avg_x, avg_y, avg_r])
+            #delete array rows so we don't go through them again
+            lst = np.delete(lst,i+1,0)
+            lst = np.delete(lst,i,0)
+            b_just_sorted = True
+        #otherwise business as usual
+        else:
+            b_just_sorted = False
+            result.append(lst[i])
+            i += 1
+    #convert to x,y list and return
+    for (x, y, r) in result:
+        xy_result.append([x,y])
+    return xy_result
 
 def compute_arrow_centroid(img):
-    contours, _ = cv2.findContours(
+    contours = cv2.findContours(
         img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
     # filter contours by area
@@ -166,15 +273,14 @@ def compute_arrow_centroid(img):
 
     for contour in contours:
         score, (cx, cy), area = circle_features(contour)
-
-        if area > 784 and area < 3600:
+        if area > 748 and area < 3600:
+            #print('Area: '+str(area))
             candidates.append(((cx, cy), score))
 
     if candidates:
         match = max(candidates, key=lambda x: x[1])
         (cx, cy), score = match
-
-        if score > 0.8:
+        if score > 0.5:
             return (int(cx), int(cy))
 
     print("Centroid not found! Returning the center point...")
@@ -185,7 +291,7 @@ def compute_arrow_centroid(img):
 
 def circle_features(contour):
     hull = cv2.convexHull(contour)
-
+    
     if len(hull) < 5:
         return 0, (-1, -1), -1
 

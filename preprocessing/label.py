@@ -15,7 +15,7 @@ direction_label = ''
 
 plt_text = None
 
-type_dictionary = {'1': 'round', '2': 'wide', '3': 'narrow'}
+type_dictionary = {'1': 'round', '2': 'wide'}
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
     print("         Q = ignore image")
     print("         1 = label as round")
     print("         2 = label as wide")
-    print("         3 = label as narrow")
+    #print("         3 = label as narrow")
     print("ARROW KEYS = label directions\n")
 
     global type_label
@@ -77,7 +77,7 @@ def on_press(event):
     global type_label
     global direction_label
 
-    if event.key in ['1', '2', '3']:
+    if event.key in ['1', '2']:
         type_label = event.key
         if len(direction_label) == 4:
             plt.close()
